@@ -52,11 +52,11 @@
 <details>
 <summary><b>点击查看：研究参考与技术源流</b></summary>
 
-> [!NOTE]
-> 本项目在独立演进过程中，曾参考或吸收了以下公开维护线的实现思路（按时间/关联度排序）：
-> 早期起点 ([yongjun925/autocollectenergy](https://github.com/yongjun925/autocollectenergy)) -> `XQuickEnergy` 系列 ([pansong291](https://github.com/pansong291/XQuickEnergy) / [constanline](https://github.com/constanline/XQuickEnergy)) -> `Sesame` 系列 ([LazyImmortal](https://github.com/LazyImmortal/Sesame) / [TKaxv-7S](https://github.com/TKaxv-7S/Sesame-TK) / [Liujishou](https://github.com/Liujishou/Sesame-TK-Fork) / [Fansirsqi](https://github.com/Fansirsqi/Sesame-TK))。
->
-> 再次强调：`Sesame-AG` 现已进入独立演进阶段，历史源流仅供技术参考，不代表单一的法律继承关系。
+本项目在独立演进过程中，曾参考或吸收了以下公开维护线的实现思路（按时间/关联度排序）：
+
+早期起点 ([yongjun925/autocollectenergy](https://github.com/yongjun925/autocollectenergy)) -> `XQuickEnergy` 系列 ([pansong291](https://github.com/pansong291/XQuickEnergy) / [constanline](https://github.com/constanline/XQuickEnergy)) -> `Sesame` 系列 ([LazyImmortal](https://github.com/LazyImmortal/Sesame) / [TKaxv-7S](https://github.com/TKaxv-7S/Sesame-TK) / [Liujishou](https://github.com/Liujishou/Sesame-TK-Fork) / [Fansirsqi](https://github.com/Fansirsqi/Sesame-TK))。
+
+再次强调：`Sesame-AG` 现已进入独立演进阶段，历史源流仅供技术参考，不代表单一的法律继承关系。
 
 </details>
 
