@@ -4,8 +4,8 @@
   <p><strong>面向学习研究场景的独立演进 Android LSPosed 模块。</strong></p>
 
   <p>
-    <a href="LICENSE"><img src="https://img.shields.io/github/license/aoguai/Sesame-AG?style=flat-square&color=orange" alt="License" /></a>
-    <a href="https://github.com/aoguai/Sesame-AG/discussions"><img src="https://img.shields.io/github/discussions/aoguai/Sesame-AG?style=flat-square&color=success" alt="Discussions" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/Sesame-AG/Sesame-AG?style=flat-square&color=orange" alt="License" /></a>
+    <a href="https://github.com/Sesame-AG/Sesame-AG/discussions"><img src="https://img.shields.io/github/discussions/Sesame-AG/Sesame-AG?style=flat-square&color=success" alt="Discussions" /></a>
   </p>
 
   <p><code>Sesame-AG</code> 一个面向学习研究场景的 Alipay LSPosed 模块分支。</p>
@@ -36,8 +36,8 @@
 
 我们鼓励每一位研究者参与到 `Sesame-AG` 的建设中来，共同维护一个健康、积极的开源环境。
 
-- **分享 RPC 配置**：如果你发现了有趣的 RPC 调用或实用的调试配置，欢迎前往 [RPC 分享讨论区](https://github.com/aoguai/Sesame-AG/discussions/categories/rpc-%E5%88%86%E4%BA%AB) 进行分享。
-- **讨论想法**：有好的想法？请优先通过 [Discussions](https://github.com/aoguai/Sesame-AG/discussions) 进行交流，确保 Issue 列表聚焦于可复现的技术问题。
+- **分享 RPC 配置**：如果你发现了有趣的 RPC 调用或实用的调试配置，欢迎前往 [RPC 分享讨论区](https://github.com/Sesame-AG/Sesame-AG/discussions/categories/rpc-%E5%88%86%E4%BA%AB) 进行分享。
+- **讨论想法**：有好的想法？请优先通过 [Discussions](https://github.com/Sesame-AG/Sesame-AG/discussions) 进行交流，确保 Issue 列表聚焦于可复现的技术问题。
 - **参与开发**：请参考 [CONTRIBUTING.md](CONTRIBUTING.md) 了解协作规范。
 
 ---
@@ -88,5 +88,5 @@
 
 感谢所有为 `Sesame-AG` 提交代码、修复问题、补全文档与改进协作流程的贡献者。
 
-[![贡献者头像墙](https://contrib.rocks/image?repo=aoguai/Sesame-AG&max=200)](https://github.com/aoguai/Sesame-AG/graphs/contributors)
+[![贡献者头像墙](https://contrib.rocks/image?repo=Sesame-AG/Sesame-AG&max=200)](https://github.com/Sesame-AG/Sesame-AG/graphs/contributors)
 

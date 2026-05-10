@@ -26,7 +26,7 @@
 我们非常欢迎各种形式的贡献，包括但不限于：
 
 - **代码贡献**：修复 Bug、优化性能、实现新功能或改进现有逻辑。
-- **RPC 分享**：在 [Discussions](https://github.com/aoguai/Sesame-AG/discussions/categories/rpc-%E5%88%86%E4%BA%AB) 分享你发现的实用 RPC 配置。
+- **RPC 分享**：在 [Discussions](https://github.com/Sesame-AG/Sesame-AG/discussions/categories/rpc-%E5%88%86%E4%BA%AB) 分享你发现的实用 RPC 配置。
 - **经验分享**：在讨论区分享你的调试技巧、环境配置经验或使用心得。
 - **社区维护**：帮助回答其他用户的问题，参与讨论，共同维护积极健康的社区氛围。
 
