@@ -310,6 +310,14 @@ object StatusFlags {
     /** 庄园：特殊食品今日已达自定义上限 */
     const val FLAG_FARM_SPECIAL_FOOD_LIMIT = "antFarm::specialFoodLimit"
 
+    /** 庄园：排位赛特殊食品今日已使用数量 */
+    const val FLAG_FARM_SPECIAL_FOOD_DONATION_COMPETITION_DAILY_COUNT =
+        "antFarm::specialFoodDonationCompetitionDailyCount"
+
+    /** 庄园：排位赛特殊食品今日已达自定义上限 */
+    const val FLAG_FARM_SPECIAL_FOOD_DONATION_COMPETITION_LIMIT =
+        "antFarm::specialFoodDonationCompetitionLimit"
+
     /** 庄园：今日是否已签到 */
     const val FLAG_FARM_SIGNED = "antFarm::signed"
 
@@ -343,7 +351,10 @@ object StatusFlags {
     /** 庄园抽抽乐：限时任务今日已结束前缀 */
     const val FLAG_FARM_CHOUCHOULE_LIMITED_ENDED_PREFIX = "antFarm::chouchouleLimitedEnded::"
 
-    /** 庄园：捐蛋排位赛今日捐蛋总数*/
+    /** 庄园：普通每日公益捐蛋今日已完成前缀 */
+    const val FLAG_FARM_DAILY_DONATION_DONE_PREFIX = "antFarm::dailyDonationDone|"
+
+    /** 庄园：今日已捐蛋总数，普通公益捐蛋与捐蛋排位赛共享 */
     const val FLAG_FARM_DONATION_COUNT = "antFarm::donationCount|"
 
     /** 庄园：捐蛋排位赛奖励今日已领取 */
@@ -374,4 +385,3 @@ object StatusFlags {
     const val FLAG_FOREST_RAIN_GAME_TASK = "AntForest::EnergyRainGameTask"
 
 }
-

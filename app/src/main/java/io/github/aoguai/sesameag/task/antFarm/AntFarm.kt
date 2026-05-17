@@ -213,11 +213,13 @@ class AntFarm : ModelTask() {
     internal var useNewEggCard: BooleanModelField? = null
     internal var harvestProduce: BooleanModelField? = null
     internal var donation: BooleanModelField? = null
-    internal var donationCount: ChoiceModelField? = null
+    internal var donationMode: ChoiceModelField? = null
+    internal var donationAmount: IntegerModelField? = null
 
     internal var donationCompetition: BooleanModelField? = null
     internal var receiveDonationCompetitionAward: BooleanModelField? = null
-    internal var harvestEggIfInsufficient: BooleanModelField? = null
+    internal var donationCompetitionTrySpecialFood: BooleanModelField? = null
+    internal var donationCompetitionSpecialFoodCount: IntegerModelField? = null
     internal var donationCompetitionTime: StringModelField? = null
     internal var watchDonationRank: BooleanModelField? = null
     internal var watchDonationAdvanceTime: IntegerModelField? = null
@@ -605,15 +607,33 @@ class AntFarm : ModelTask() {
             ).withDesc("自动捐赠爱心鸡蛋到公益项目。").also { donation = it })
         modelFields.addField(
             ChoiceModelField(
-                "donationCount",
-                "每日捐蛋 | 次数",
-                DonationCount.ONE,
-                DonationCount.nickNames
-            ).withDesc("控制每日捐蛋次数。").also { donationCount = it })
+                "donationMode",
+                "每日捐蛋 | 模式",
+                DonationMode.ONE_AVAILABLE_PROJECT,
+                DonationMode.nickNames
+            ).withDesc("控制普通每日公益捐蛋选择哪些项目。").also { donationMode = it })
+        modelFields.addField(
+            IntegerModelField(
+                "donationAmount",
+                "每日捐蛋 | 单次数量",
+                1,
+                1,
+                20000
+            ).withDesc("每一次公益捐蛋捐出的爱心蛋数量。").also { donationAmount = it })
+        modelFields.addField(
+            IntegerModelField(
+                "maxDailyDonationCompetitionCount",
+                "每日捐蛋上限",
+                -1,
+                -1,
+                20000
+            ).withDesc("控制今日最多允许捐出的爱心蛋总量；普通每日公益捐蛋与排位赛补捐共享该上限，-1 表示不限制。").also {
+                maxDailyDonationCompetitionCount = it
+            })
         modelFields.addField(
             BooleanModelField(
                 "donationCompetition",
-                "捐蛋排行",
+                "开启捐蛋排行赛",
                 false
             ).withDesc("执行庄园捐蛋排位赛，自动加入并按配置执行卡点反超逻辑。").also { donationCompetition = it })
         modelFields.addField(
@@ -626,11 +646,21 @@ class AntFarm : ModelTask() {
             })
         modelFields.addField(
             BooleanModelField(
-                "harvestEggIfInsufficient",
-                "剩余蛋数不足时收获蛋",
+                "donationCompetitionTrySpecialFood",
+                "排位赛蛋不足时尝试特殊食品",
                 false
-            ).withDesc("在执行卡点捐蛋时，如果现有鸡蛋不足，且开启了此选项，则尝试先收取待收取的爱心蛋。").also {
-                harvestEggIfInsufficient = it
+            ).withDesc("仅在排位赛补捐时生效：鸡蛋不足会尝试使用特殊食品补充产蛋进度。依赖“使用特殊食品”主开关。").also {
+                donationCompetitionTrySpecialFood = it
+            })
+        modelFields.addField(
+            IntegerModelField(
+                "donationCompetitionSpecialFoodCount",
+                "排位赛特殊食品每日上限",
+                -1,
+                -1,
+                20000
+            ).withDesc("仅用于排位赛补捐阶段自动使用特殊食品的次数上限；与日常“使用特殊食品 | 每日次数限制”独立计数，-1 表示不限制。").also {
+                donationCompetitionSpecialFoodCount = it
             })
         modelFields.addField(
             StringModelField(
@@ -662,16 +692,6 @@ class AntFarm : ModelTask() {
                 1,
                 60
             ).withDesc("高频轮询期间刷新排行榜的间隔时间。").also { watchDonationRefreshInterval = it })
-        modelFields.addField(
-            IntegerModelField(
-                "maxDailyDonationCompetitionCount",
-                "每日捐蛋总数",
-                10,
-                1,
-                20000
-            ).withDesc("设置排位赛每日允许捐赠的最大爱心蛋总数，达到上限后停止蹲点。防止排行榜过卷把蛋捐完了").also {
-                maxDailyDonationCompetitionCount = it
-            })
         modelFields.addField(
             BooleanModelField(
                 "useSpecialFood",
@@ -874,6 +894,10 @@ class AntFarm : ModelTask() {
         return AnimalFeedStatus.SLEEPY.name == ownerAnimal.animalFeedStatus
     }
 
+    internal fun isOwnerAnimalAtHome(): Boolean {
+        return AnimalInteractStatus.HOME.name == ownerAnimal.animalInteractStatus
+    }
+
     internal fun ensureOwnerAnimalAtHome(actionName: String): Boolean {
         if (AnimalInteractStatus.HOME.name == ownerAnimal.animalInteractStatus) {
             return true
@@ -897,8 +921,25 @@ class AntFarm : ModelTask() {
     }
 
     internal fun shouldDonateEggNow(userId: String?): Boolean {
-        val limit = if (donationCount?.value == DonationCount.ALL) Int.MAX_VALUE else 1
-        return donation?.value == true && Status.getDonationCount(userId) < limit && harvestBenevolenceScore >= 1
+        if (donation?.value != true || userId.isNullOrBlank()) {
+            return false
+        }
+        val amount = donationAmount?.value ?: 1
+        val dailyLimit = maxDailyDonationCompetitionCount?.value ?: -1
+        if (dailyLimit >= 0) {
+            val remainingQuota = dailyLimit - Status.getDailyDonationTotal(userId)
+            if (remainingQuota < amount) {
+                return false
+            }
+        }
+        if (Status.hasFlagToday(StatusFlags.FLAG_FARM_DAILY_DONATION_DONE_PREFIX + userId)) {
+            return false
+        }
+        return harvestBenevolenceScore >= amount
+    }
+
+    internal fun isAutoUseSpecialFoodEnabled(): Boolean {
+        return useSpecialFood?.value == true
     }
 
     internal fun preloadFarmTools() {
@@ -1853,58 +1894,225 @@ class AntFarm : ModelTask() {
     }
 
     /* 捐赠爱心鸡蛋 */
-    internal fun handleDonation(
-        donationType: Int,
-        markStatusDone: Boolean = true,
-        skipActivityIds: Set<String> = emptySet()
-    ): Boolean {
+    internal fun handleDonation(): Boolean {
         try {
+            val uid = UserMap.currentUid
+            if (uid.isNullOrBlank()) {
+                Log.farm("公益捐蛋跳过：当前用户ID为空")
+                return false
+            }
+            val dailyLimit = maxDailyDonationCompetitionCount?.value ?: -1
+            if (dailyLimit >= 0) {
+                val currentDailyTotal = Status.getDailyDonationTotal(uid)
+                if (currentDailyTotal >= dailyLimit) {
+                    Log.farm("今日已捐蛋总数($currentDailyTotal)已达每日捐蛋上限($dailyLimit)，跳过普通每日捐蛋")
+                    return false
+                }
+            }
+
+            val amount = donationAmount?.value ?: 1
+            if (harvestBenevolenceScore < amount) {
+                Log.farm("可用爱心蛋不足，跳过普通每日捐蛋：当前${harvestBenevolenceScore}颗，需要${amount}颗")
+                return false
+            }
+
             val donatedActivityIds = linkedSetOf<String>()
             lastDonationActivityIds = emptySet()
             lastDonationNoMoreActivities = false
+
             val s = AntFarmRpcCall.listActivityInfo()
-            var jo = JSONObject(s)
-            val memo = jo.getString("memo")
-            if (ResChecker.checkRes(TAG, jo)) {
-                val jaActivityInfos = jo.getJSONArray("activityInfos")
-                var activityId: String? = null
-                var activityName: String?
-                var isDonation = false
-                for (i in 0..<jaActivityInfos.length()) {
-                    jo = jaActivityInfos.getJSONObject(i)
-                    val currentActivityId = jo.optString("activityId")
-                    if (currentActivityId.isBlank() || skipActivityIds.contains(currentActivityId)) {
-                        continue
-                    }
-                    if (jo.get("donationTotal") != jo.get("donationLimit")) {
-                        activityId = currentActivityId
-                        activityName = jo.optString("projectName", activityId)
-                        if (performDonation(activityId, activityName)) {
-                            isDonation = true
-                            donatedActivityIds.add(currentActivityId)
-                            if (donationType == DonationCount.ONE) {
-                                break
-                            }
+            val jo = JSONObject(s)
+            if (!ResChecker.checkRes(TAG, jo)) {
+                Log.farm("查询公益捐蛋项目失败: ${formatDonationFailure(jo)}")
+                return false
+            }
+
+            val activityInfos = jo.optJSONArray("activityInfos") ?: run {
+                Log.farm("查询公益捐蛋项目失败：activityInfos 为空")
+                return false
+            }
+            val mode = donationMode?.value ?: DonationMode.ONE_AVAILABLE_PROJECT
+            var hasAvailableProject = false
+            var hasDonationSuccess = false
+            var donationFailed = false
+            var stoppedForInsufficientEggs = false
+            var stoppedForDailyLimit = false
+            var hasUnconfirmedUndonatedProject = false
+            var hasInvalidActivityInfo = false
+
+            for (i in 0 until activityInfos.length()) {
+                val activity = activityInfos.optJSONObject(i) ?: continue
+                val activityId = activity.optString("activityId")
+                if (activityId.isBlank()) {
+                    hasInvalidActivityInfo = true
+                    Log.farm("公益捐蛋项目缺少 activityId，跳过")
+                    continue
+                }
+                if (!activity.has("donationTotal") || !activity.has("donationLimit")) {
+                    hasInvalidActivityInfo = true
+                    Log.farm("公益捐蛋项目[$activityId]缺少 donationTotal/donationLimit，跳过")
+                    continue
+                }
+
+                val activityName = activity.optString("projectName", activityId)
+                val donationTotal = activity.optDouble("donationTotal", 0.0)
+                val donationLimit = activity.optDouble("donationLimit", 0.0)
+                if (donationTotal >= donationLimit) {
+                    continue
+                }
+                hasAvailableProject = true
+
+                if (mode == DonationMode.ALL_UNDONATED_PROJECTS) {
+                    when (isUndonatedByCurrentUser(activity, uid)) {
+                        true -> Unit
+                        false -> {
+                            Log.farm("公益捐蛋活动❤️[$activityName]#当前账号已捐过，跳过")
+                            continue
+                        }
+
+                        null -> {
+                            hasUnconfirmedUndonatedProject = true
+                            Log.farm("公益捐蛋活动❤️[$activityName]#无法确认当前账号是否未捐，跳过")
+                            continue
                         }
                     }
                 }
-                lastDonationActivityIds = donatedActivityIds
-                if (isDonation && markStatusDone) {
-                    Status.updateDonationCount(UserMap.currentUid, 1, incremental = true)
+
+                if (dailyLimit >= 0) {
+                    val remainingQuota = dailyLimit - Status.getDailyDonationTotal(uid)
+                    if (remainingQuota < amount) {
+                        stoppedForDailyLimit = true
+                        if (remainingQuota <= 0) {
+                            Log.farm("今日已捐蛋总数已达每日捐蛋上限($dailyLimit)，停止本轮普通每日捐蛋")
+                        } else {
+                            Log.farm("今日捐蛋剩余额度不足单次捐蛋量，停止本轮普通每日捐蛋：剩余${remainingQuota}颗，单次需要${amount}颗")
+                        }
+                        break
+                    }
                 }
-                if (activityId == null) {
-                    lastDonationNoMoreActivities = true
-                    Log.farm("今日已无可捐赠的活动")
+
+                if (harvestBenevolenceScore < amount) {
+                    stoppedForInsufficientEggs = true
+                    Log.farm("可用爱心蛋不足，停止本轮普通每日捐蛋：当前${harvestBenevolenceScore}颗，需要${amount}颗")
+                    break
                 }
-                return isDonation
-            } else {
-                Log.farm(memo)
-                Log.farm(s)
+
+                val result = performDonationDetailed(activityId, activityName, amount)
+                if (!result.success) {
+                    donationFailed = true
+                    break
+                }
+
+                hasDonationSuccess = true
+                donatedActivityIds.add(activityId)
+                Status.updateDailyDonationTotal(uid, result.actualAmount, incremental = true)
+
+                if (mode == DonationMode.ONE_AVAILABLE_PROJECT) {
+                    break
+                }
             }
+
+            lastDonationActivityIds = donatedActivityIds
+            lastDonationNoMoreActivities = !hasAvailableProject && !hasInvalidActivityInfo
+            if (lastDonationNoMoreActivities) {
+                Log.farm("今日已无可捐赠的活动")
+            }
+
+            val shouldMarkDone = when (mode) {
+                DonationMode.ONE_AVAILABLE_PROJECT -> hasDonationSuccess
+                DonationMode.ALL_AVAILABLE_PROJECTS ->
+                    !donationFailed && !stoppedForInsufficientEggs && !stoppedForDailyLimit && !hasInvalidActivityInfo &&
+                        (hasDonationSuccess || !hasAvailableProject)
+
+                DonationMode.ALL_UNDONATED_PROJECTS ->
+                    !donationFailed && !stoppedForInsufficientEggs && !stoppedForDailyLimit &&
+                        !hasUnconfirmedUndonatedProject &&
+                        !hasInvalidActivityInfo
+
+                else -> hasDonationSuccess
+            }
+            if (shouldMarkDone) {
+                Status.setFlagToday(StatusFlags.FLAG_FARM_DAILY_DONATION_DONE_PREFIX + uid)
+            }
+            return hasDonationSuccess
         } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "donation err:",t)
+            Log.printStackTrace(TAG, "donation err:", t)
         }
         return false
+    }
+
+    private data class DonationPerformResult(
+        val success: Boolean,
+        val actualAmount: Int = 0
+    )
+
+    private fun isUndonatedByCurrentUser(activity: JSONObject, uid: String): Boolean? {
+        val activityRecords = activity.optJSONArray("activityRecords") ?: return null
+        for (index in 0 until activityRecords.length()) {
+            val record = activityRecords.optJSONObject(index) ?: return null
+            val userInfo = record.optJSONObject("userInfo") ?: return null
+            val recordUserId = userInfo.optString("userId")
+            if (recordUserId.isBlank()) {
+                return null
+            }
+            if (recordUserId == uid) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private fun performDonationDetailed(
+        activityId: String?,
+        activityName: String?,
+        count: Int,
+        historyCount: Int = 0
+    ): DonationPerformResult {
+        try {
+            val s = AntFarmRpcCall.donation(activityId, count)
+            val donationResponse = JSONObject(s)
+            if (ResChecker.checkRes(TAG, donationResponse)) {
+                val donationDetails = donationResponse.optJSONObject("donation")
+                val responseAmount = donationDetails?.optInt("donationAmount", count) ?: count
+                val actualAmount = if (responseAmount > 0) responseAmount else count
+                syncHarvestBenevolenceScoreAfterDonation(donationDetails, actualAmount)
+
+                if (historyCount == 0) {
+                    Log.farm("捐赠活动❤️[$activityName]#捐赠了${actualAmount}颗蛋，首次捐赠该项目")
+                } else {
+                    Log.farm("捐赠活动❤️[$activityName]#捐赠了${actualAmount}颗蛋，累计捐赠${historyCount + 1}次")
+                }
+                return DonationPerformResult(true, actualAmount)
+            }
+            Log.farm("捐赠失败: ${formatDonationFailure(donationResponse)}")
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "performDonation err:", t)
+        }
+        return DonationPerformResult(false)
+    }
+
+    private fun syncHarvestBenevolenceScoreAfterDonation(donationDetails: JSONObject?, actualAmount: Int) {
+        val localRemaining = (harvestBenevolenceScore - actualAmount).coerceAtLeast(0.0)
+        if (donationDetails == null || !donationDetails.has("harvestBenevolenceScore")) {
+            harvestBenevolenceScore = localRemaining
+            return
+        }
+
+        val responseRemaining = donationDetails.optDouble("harvestBenevolenceScore", Double.NaN)
+        harvestBenevolenceScore = if (!responseRemaining.isNaN() && responseRemaining >= 0.0) {
+            responseRemaining
+        } else {
+            localRemaining
+        }
+    }
+
+    private fun formatDonationFailure(jo: JSONObject): String {
+        val resultDesc = jo.optString("resultDesc")
+        val memo = jo.optString("memo")
+        val resultCode = jo.optString("resultCode")
+        return "resultDesc=${resultDesc.ifBlank { "<blank>" }}, " +
+            "memo=${memo.ifBlank { "<blank>" }}, " +
+            "resultCode=${resultCode.ifBlank { "<blank>" }}, response=$jo"
     }
 
     internal fun AntFarm.performDonation(
@@ -1913,30 +2121,7 @@ class AntFarm : ModelTask() {
         count: Int = 1,
         historyCount: Int = 0
     ): Boolean {
-        try {
-            val s = AntFarmRpcCall.donation(activityId, count)
-            val donationResponse = JSONObject(s)
-            if (ResChecker.checkRes(TAG, donationResponse)) {
-                val donationDetails = donationResponse.optJSONObject("donation")
-                if (donationDetails != null) {
-                    harvestBenevolenceScore = donationDetails.optDouble("harvestBenevolenceScore")
-
-                    if (historyCount == 0) {
-                        Log.farm("捐赠活动❤️[$activityName]#捐赠了${count}颗蛋，首次捐赠该项目")
-                    } else {
-                        Log.farm("捐赠活动❤️[$activityName]#捐赠了${count}颗蛋，累计捐赠${historyCount + 1}次")
-                    }
-                } else {
-                    Log.farm("捐赠活动❤️[$activityName]#捐赠了${count}颗蛋")
-                }
-                return true
-            } else {
-                Log.farm("捐赠失败: ${donationResponse.optString("memo")}")
-            }
-        } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "performDonation err:", t)
-        }
-        return false
+        return performDonationDetailed(activityId, activityName, count, historyCount).success
     }
 
     @Suppress("SameParameterValue")
@@ -3776,7 +3961,14 @@ class AntFarm : ModelTask() {
      * @param cuisineList 待使用的美食列表
      * @param maxUsage 本次运行总计使用的美食数量。-1 为尝试吃完传入列表中的指定数量。
      */
-    internal fun useSpecialFood(cuisineList: JSONArray, maxUsage: Int = -1): Int {
+    internal fun useSpecialFood(
+        cuisineList: JSONArray,
+        maxUsage: Int = -1,
+        usageCountFlag: String = StatusFlags.FLAG_FARM_SPECIAL_FOOD_DAILY_COUNT,
+        usageLimitFlag: String = StatusFlags.FLAG_FARM_SPECIAL_FOOD_LIMIT,
+        usageDailyLimit: Int = useSpecialFoodCount?.value ?: -1,
+        usageLabel: String = "特殊食品"
+    ): Int {
         var usedCount = 0
         try {
             val foodList = mutableListOf<JSONObject>()
@@ -3876,15 +4068,14 @@ class AntFarm : ModelTask() {
             Log.printStackTrace(TAG, "useSpecialFood 批量模式 err:", t)
         }
         if (usedCount > 0) {
-            val usedToday = Status.getIntFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_DAILY_COUNT) ?: 0
+            val usedToday = Status.getIntFlagToday(usageCountFlag) ?: 0
             val newUsedToday = usedToday + usedCount
-            Status.setIntFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_DAILY_COUNT, newUsedToday)
+            Status.setIntFlagToday(usageCountFlag, newUsedToday)
 
-            val dailyLimit = useSpecialFoodCount?.value ?: -1
-            if (dailyLimit > 0 && newUsedToday >= dailyLimit) {
-                Status.setFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_LIMIT)
+            if (usageDailyLimit > 0 && newUsedToday >= usageDailyLimit) {
+                Status.setFlagToday(usageLimitFlag)
             }
-            Log.farm("特殊食品今日已累计使用${newUsedToday}个")
+            Log.farm("${usageLabel}今日已累计使用${newUsedToday}个")
         }
         return usedCount
     }
@@ -4882,11 +5073,16 @@ class AntFarm : ModelTask() {
         }
     }
 
-    interface DonationCount {
+    interface DonationMode {
         companion object {
-            const val ONE: Int = 0
-            const val ALL: Int = 1
-            val nickNames: Array<String?> = arrayOf<String?>("随机一次", "随机多次")
+            const val ONE_AVAILABLE_PROJECT: Int = 0
+            const val ALL_AVAILABLE_PROJECTS: Int = 1
+            const val ALL_UNDONATED_PROJECTS: Int = 2
+            val nickNames: Array<String?> = arrayOf<String?>(
+                "当日列表中的一个项目",
+                "当日列表中全部可捐项目",
+                "当日列表中所有未捐项目"
+            )
         }
     }
 
@@ -5799,4 +5995,3 @@ class AntFarm : ModelTask() {
         }
     }
 }
-

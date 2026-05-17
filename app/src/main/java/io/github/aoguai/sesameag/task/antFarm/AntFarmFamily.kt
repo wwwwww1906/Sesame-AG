@@ -56,17 +56,6 @@ data object AntFarmFamily {
      */
     private var eatTogetherConfig: JSONObject = JSONObject()
 
-    internal enum class DailyDonateTaskResult(
-        val consumedDonation: Boolean,
-        val shouldMarkDonationDone: Boolean
-    ) {
-        NOT_HANDLED(false, false),
-        SKIPPED(false, false),
-        ALREADY_COMPLETED(false, false),
-        DONATED_CONFIRMED(true, true),
-        DONATED_UNCONFIRMED(true, false)
-    }
-
     private data class FamilyAssignCandidate(
         val userId: String,
         val userName: String,
@@ -238,61 +227,28 @@ data object AntFarmFamily {
         return selected.userId
     }
 
-    private fun resolveCurrentFamilyGroupId(enterRes: JSONObject): String {
-        val currentGroupId = enterRes.optString("groupId")
-        if (currentGroupId.isNotBlank()) {
-            return currentGroupId
-        }
-        return try {
-            val queryRes = JSONObject(AntFarmRpcCall.queryFamilyInfo())
-            if (!ResChecker.checkRes(TAG, queryRes)) {
-                ""
-            } else {
-                queryRes.optString("groupId")
-            }
-        } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "resolveCurrentFamilyGroupId err:", t)
-            ""
-        }
-    }
-
-    private fun queryFamilyTaskEntry(taskLogName: String, vararg taskKeys: String): JSONObject? {
+    private fun queryDailyDonateTaskAfterPublicDonation(): JSONObject? {
+        val taskLogName = "家庭任务🏠每日捐蛋"
+        RpcCache.invalidate("com.alipay.antfarm.listFamilyTask")
         val taskJo = JSONObject(AntFarmRpcCall.listFamilyTask())
         if (!ResChecker.checkRes(TAG, taskJo)) {
-            Log.farm("$taskLogName#listFamilyTask 调用失败，跳过")
+            Log.farm("$taskLogName#listFamilyTask 调用失败: ${formatFamilyTaskFailure(taskJo)}")
             return null
         }
         val familyTasks = taskJo.optJSONArray("familyTasks") ?: run {
-            Log.farm("$taskLogName#familyTasks 为空，跳过")
+            Log.farm("$taskLogName#familyTasks 为空")
             return null
         }
         for (index in 0 until familyTasks.length()) {
             val task = familyTasks.optJSONObject(index) ?: continue
             val bizKey = task.optString("bizKey")
             val taskId = task.optString("taskId")
-            if (taskKeys.any { it == bizKey || it == taskId }) {
+            if (bizKey == DAILY_DONATE_TASK_ID || taskId == DAILY_DONATE_TASK_ID) {
                 return task
             }
         }
+        Log.farm("$taskLogName#未找到 DAILY_DONATE")
         return null
-    }
-
-    private fun queryFamilyTaskEntryFresh(taskLogName: String, vararg taskKeys: String): JSONObject? {
-        RpcCache.invalidate("com.alipay.antfarm.listFamilyTask")
-        return queryFamilyTaskEntry(taskLogName, *taskKeys)
-    }
-
-    private fun canDoFamilyTask(task: JSONObject): Boolean {
-        val extend = task.optString("extend")
-        if (extend.isBlank()) {
-            return true
-        }
-        return try {
-            val extendJo = JSONObject(extend)
-            !extendJo.has("canDo") || extendJo.optString("canDo").equals("true", true)
-        } catch (_: Throwable) {
-            true
-        }
     }
 
     private fun extractFamilyTaskAwardCount(task: JSONObject?): Int {
@@ -301,7 +257,17 @@ data object AntFarmFamily {
         }
         val awardCount = task.optInt("awardCount", 0)
         val canReceiveAwardCount = task.optInt("canReceiveAwardCount", 0)
-        return maxOf(awardCount, canReceiveAwardCount)
+        val alreadyReceiveStageAwardCount = task.optInt("alreadyReceiveStageAwardCount", 0)
+        return maxOf(awardCount, canReceiveAwardCount, alreadyReceiveStageAwardCount)
+    }
+
+    private fun formatFamilyTaskFailure(jo: JSONObject): String {
+        val resultDesc = jo.optString("resultDesc")
+        val memo = jo.optString("memo")
+        val resultCode = jo.optString("resultCode")
+        return "resultDesc=${resultDesc.ifBlank { "<blank>" }}, " +
+            "memo=${memo.ifBlank { "<blank>" }}, " +
+            "resultCode=${resultCode.ifBlank { "<blank>" }}, response=$jo"
     }
 
     private fun logDailyDonateTaskAward(taskTitle: String, task: JSONObject?) {
@@ -325,9 +291,7 @@ data object AntFarmFamily {
         val taskId = task?.optString("taskId").orEmpty().ifBlank { DAILY_DONATE_TASK_ID }
         val receiveRes = JSONObject(AntFarmRpcCall.familyReceiveFarmTaskAward(taskId))
         if (!ResChecker.checkRes(TAG, receiveRes)) {
-            val failMsg = receiveRes.optString("resultDesc")
-                .ifBlank { receiveRes.optString("memo") }
-                .ifBlank { receiveRes.toString() }
+            val failMsg = formatFamilyTaskFailure(receiveRes)
             Log.farm("家庭任务🏠$taskTitle#任务已完成，但领取亲密度失败: $failMsg")
             return false
         }
@@ -335,84 +299,33 @@ data object AntFarmFamily {
         return true
     }
 
-    internal fun handleDailyDonateTask(antFarm: AntFarm): DailyDonateTaskResult {
+    internal fun confirmDailyDonateTaskAfterPublicDonation() {
         try {
-            runCatching {
-                AntFarmRpcCall.refinedOperation("ENTERFAMILY")
-            }
-            val enterRes = JSONObject(AntFarmRpcCall.enterFamily())
-            if (!ResChecker.checkRes(TAG, enterRes)) {
-                Log.farm("家庭任务🏠每日捐蛋#进入家庭失败，跳过")
-                return DailyDonateTaskResult.SKIPPED
-            }
-            val currentGroupId = resolveCurrentFamilyGroupId(enterRes)
-            if (currentGroupId.isBlank()) {
-                Log.farm("家庭任务🏠每日捐蛋#请先开通小鸡家庭，跳过")
-                return DailyDonateTaskResult.SKIPPED
-            }
-
-            val donateTask = queryFamilyTaskEntryFresh("家庭任务🏠每日捐蛋", DAILY_DONATE_TASK_ID) ?: run {
-                Log.farm("家庭任务🏠每日捐蛋#未找到 DAILY_DONATE 任务，跳过")
-                return DailyDonateTaskResult.SKIPPED
-            }
+            val donateTask = queryDailyDonateTaskAfterPublicDonation() ?: return
             val taskStatus = donateTask.optString("taskStatus")
             val taskTitle = donateTask.optString("title", "每日捐蛋做好事")
             when (taskStatus) {
                 "RECEIVED" -> {
-                    Log.farm("家庭任务🏠$taskTitle#今日已完成，跳过")
-                    return DailyDonateTaskResult.ALREADY_COMPLETED
+                    logDailyDonateTaskAward(taskTitle, donateTask)
                 }
 
                 "FINISHED" -> {
-                    if (receiveDailyDonateTaskAward(taskTitle, donateTask)) {
-                        Log.farm("家庭任务🏠$taskTitle#今日已完成，跳过")
-                    } else {
+                    if (!receiveDailyDonateTaskAward(taskTitle, donateTask)) {
                         Log.farm("家庭任务🏠$taskTitle#今日已完成，但亲密度领取失败，保留后续重试")
                     }
-                    return DailyDonateTaskResult.ALREADY_COMPLETED
                 }
 
-                "TODO" -> Unit
+                "TODO" -> {
+                    Log.farm("家庭任务🏠$taskTitle#普通捐蛋已成功，但家庭任务仍未刷新为完成")
+                }
+
                 else -> {
-                    Log.farm("家庭任务🏠$taskTitle#当前状态[$taskStatus]，跳过")
-                    return DailyDonateTaskResult.SKIPPED
+                    Log.farm("家庭任务🏠$taskTitle#普通捐蛋已成功，家庭任务当前状态[$taskStatus]")
                 }
             }
-
-            if (!canDoFamilyTask(donateTask)) {
-                Log.farm("家庭任务🏠$taskTitle#当前不可执行，跳过")
-                return DailyDonateTaskResult.SKIPPED
-            }
-
-            if (!antFarm.shouldDonateEggNow(UserMap.currentUid)) {
-                Log.farm("家庭任务🏠$taskTitle#当前无可捐爱心蛋或今日捐蛋已处理，跳过")
-                return DailyDonateTaskResult.SKIPPED
-            }
-
-            val donated = antFarm.handleDonation(
-                AntFarm.DonationCount.ONE,
-                markStatusDone = false
-            )
-            if (!donated) {
-                Log.farm("家庭任务🏠$taskTitle#未找到可捐赠公益项目或捐蛋未成功")
-                return DailyDonateTaskResult.SKIPPED
-            }
-
-            val refreshedTask = queryFamilyTaskEntryFresh("家庭任务🏠每日捐蛋", DAILY_DONATE_TASK_ID)
-            val refreshedStatus = refreshedTask?.optString("taskStatus").orEmpty()
-            if (receiveDailyDonateTaskAward(taskTitle, refreshedTask)) {
-                return DailyDonateTaskResult.DONATED_CONFIRMED
-            }
-            if (refreshedStatus == "FINISHED") {
-                return DailyDonateTaskResult.DONATED_UNCONFIRMED
-            }
-
-            Log.farm("家庭任务🏠$taskTitle#已执行捐蛋，但任务状态未刷新为完成，请关注后续日志")
-            return DailyDonateTaskResult.DONATED_UNCONFIRMED
         } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "handleDailyDonateTask err:", t)
+            Log.printStackTrace(TAG, "confirmDailyDonateTaskAfterPublicDonation err:", t)
         }
-        return DailyDonateTaskResult.SKIPPED
     }
 
 
@@ -1376,4 +1289,3 @@ data object AntFarmFamily {
         }
     }
 }
-

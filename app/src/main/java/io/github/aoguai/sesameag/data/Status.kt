@@ -474,21 +474,21 @@ class Status {
          * 获取今日捐蛋总数
          */
         @JvmStatic
-        fun getDonationCount(uid: String?): Int {
+        fun getDailyDonationTotal(uid: String?): Int {
             if (uid.isNullOrEmpty()) return 0
             return getIntFlagToday(StatusFlags.FLAG_FARM_DONATION_COUNT + uid) ?: 0
         }
 
         /**
-         * 更新捐蛋计数
+         * 更新今日捐蛋总数
          * @param incremental true: 累加原有数值, false: 强制覆盖为新数值(用于服务器同步)
          */
         @JvmStatic
-        fun updateDonationCount(uid: String?, count: Int, incremental: Boolean = true) {
+        fun updateDailyDonationTotal(uid: String?, count: Int, incremental: Boolean = true) {
             if (uid.isNullOrEmpty()) return
-            val finalCount = if (incremental) getDonationCount(uid) + count else count
+            val finalCount = if (incremental) getDailyDonationTotal(uid) + count else count
 
-            if (finalCount != getDonationCount(uid)) {
+            if (finalCount != getDailyDonationTotal(uid)) {
                 setIntFlagToday(StatusFlags.FLAG_FARM_DONATION_COUNT + uid, finalCount)
             }
         }

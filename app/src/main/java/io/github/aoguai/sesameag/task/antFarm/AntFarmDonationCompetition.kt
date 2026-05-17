@@ -10,6 +10,7 @@ import io.github.aoguai.sesameag.util.ResChecker
 import io.github.aoguai.sesameag.util.TimeUtil
 import io.github.aoguai.sesameag.util.maps.UserMap
 import kotlinx.coroutines.delay
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -60,7 +61,10 @@ private fun receiveCompetitionAwards(): Int {
     try {
         val res = AntFarmRpcCall.enterCompetitionAwardPage()
         val jo = JSONObject(res)
-        if (!ResChecker.checkRes(TAG, jo)) return 0
+        if (!ResChecker.checkRes(TAG, jo)) {
+            Log.record(TAG, "进入排位赛奖励页失败：${formatDonationAwardFailure(jo)}")
+            return 0
+        }
 
         val userLevelInfo = jo.optJSONObject("userDonationLevelInfo") ?: return 0
         val currentLevelId = userLevelInfo.optInt("levelId")
@@ -131,8 +135,12 @@ private fun receiveCompetitionAwards(): Int {
 
         if (claimableCount == 0) {
             Log.record(TAG, "当前没有可领取的排位赛段位奖励")
+            Status.setFlagToday(StatusFlags.FLAG_FARM_DONATION_COMPETITION_AWARD_RECEIVED)
+        } else if (receivedCount == claimableCount) {
+            Status.setFlagToday(StatusFlags.FLAG_FARM_DONATION_COMPETITION_AWARD_RECEIVED)
+        } else {
+            Log.record(TAG, "排位赛段位奖励仍有${claimableCount - receivedCount}个未领取，保留后续重试")
         }
-        Status.setFlagToday(StatusFlags.FLAG_FARM_DONATION_COMPETITION_AWARD_RECEIVED)
         return receivedCount
     } catch (e: Exception) {
         Log.printStackTrace(TAG, "receiveCompetitionAwards err:", e)
@@ -158,10 +166,10 @@ private fun AntFarm.scheduleDonationCompetitionTask(endTimeMs: Long) {
     if (hasChildTask(taskId)) return
 
     val uid = UserMap.currentUid
-    val maxDonation = maxDailyDonationCompetitionCount?.value ?: 10
-    val currentDonated = Status.getDonationCount(uid)
-    if (currentDonated >= maxDonation) {
-        Log.record(TAG, "今日排位赛捐蛋数($currentDonated)已达上限($maxDonation)，跳过任务调度")
+    val maxDonation = maxDailyDonationCompetitionCount?.value ?: -1
+    val currentDonated = Status.getDailyDonationTotal(uid)
+    if (maxDonation >= 0 && currentDonated >= maxDonation) {
+        Log.record(TAG, "今日已捐蛋总数($currentDonated)已达每日捐蛋上限($maxDonation)，跳过任务调度")
         return
     }
 
@@ -195,9 +203,11 @@ private fun AntFarm.scheduleDonationCompetitionTask(endTimeMs: Long) {
             } else {
                 Log.record(TAG, "🔔 执行单次排位赛捐赠检查")
                 val uid = UserMap.currentUid ?: return@ChildModelTask
-                val donationsMadeToday = Status.getDonationCount(uid)
-                val maxDonation = maxDailyDonationCompetitionCount?.value ?: 10
-                if (donationsMadeToday < maxDonation) {
+                val donationsMadeToday = Status.getDailyDonationTotal(uid)
+                val maxDonation = maxDailyDonationCompetitionCount?.value ?: -1
+                if (maxDonation < 0) {
+                    checkRankAndDonate(Int.MAX_VALUE)
+                } else if (donationsMadeToday < maxDonation) {
                     checkRankAndDonate(maxDonation - donationsMadeToday)
                 }
             }
@@ -216,15 +226,19 @@ private suspend fun AntFarm.runDonationRankWatchLoop(endTimeMs: Long) {
 
     while (System.currentTimeMillis() < endTimeMs) {
         val uid = UserMap.currentUid ?: break
-        val currentDonated = Status.getDonationCount(uid)
-        val maxDonation = maxDailyDonationCompetitionCount?.value ?: 10
+        val currentDonated = Status.getDailyDonationTotal(uid)
+        val maxDonation = maxDailyDonationCompetitionCount?.value ?: -1
 
-        if (currentDonated >= maxDonation) {
-            Log.record(TAG, "已达到每日捐蛋排位限额($maxDonation)，结束蹲点。")
+        if (maxDonation >= 0 && currentDonated >= maxDonation) {
+            Log.record(TAG, "已达到每日捐蛋上限($maxDonation)，结束蹲点。")
             break
         }
 
-        checkRankAndDonate(maxDonation - currentDonated)
+        if (maxDonation < 0) {
+            checkRankAndDonate(Int.MAX_VALUE)
+        } else {
+            checkRankAndDonate(maxDonation - currentDonated)
+        }
 
         delay(refreshSec * 1000L)
     }
@@ -257,10 +271,20 @@ private fun AntFarm.checkRankAndDonate(remainingQuota: Int): Boolean {
                     return false
                 }
 
-                val serverDonationCount = myData.getInt("donationNum")
-                val localDonationCount = Status.getDonationCount(myUid)
-                if (serverDonationCount != localDonationCount) {
-                    Status.updateDonationCount(myUid, serverDonationCount, incremental = false)
+                val serverDonationTotal = myData.getInt("donationNum")
+                val localDonationTotal = Status.getDailyDonationTotal(myUid)
+                if (serverDonationTotal != localDonationTotal) {
+                    Status.updateDailyDonationTotal(myUid, serverDonationTotal, incremental = false)
+                }
+                val maxDonation = maxDailyDonationCompetitionCount?.value ?: -1
+                val effectiveRemainingQuota = if (maxDonation < 0) {
+                    remainingQuota
+                } else {
+                    minOf(remainingQuota, maxDonation - serverDonationTotal)
+                }
+                if (effectiveRemainingQuota <= 0) {
+                    Log.record(TAG, "今日已捐蛋总数($serverDonationTotal)已达每日捐蛋上限($maxDonation)，放弃补捐")
+                    return false
                 }
 
                 val myRank = myData.getInt("rankOrder")
@@ -268,7 +292,7 @@ private fun AntFarm.checkRankAndDonate(remainingQuota: Int): Boolean {
 
                 // 如果已经是第一名，根据策略不做处理
                 if (myRank == 1) {
-                    Log.record(TAG, "当前已是第一名(${serverDonationCount}蛋)，无需捐赠")
+                    Log.record(TAG, "当前已是第一名(${serverDonationTotal}蛋)，无需捐赠")
                     return false
                 }
 
@@ -288,8 +312,8 @@ private fun AntFarm.checkRankAndDonate(remainingQuota: Int): Boolean {
 
                     // 只有当该名次的奖励高于我当前的奖励时才考虑
                     if (oStars > myStars) {
-                        val eggsNeeded = oDonation - serverDonationCount + 1
-                        if (eggsNeeded <= remainingQuota) {
+                        val eggsNeeded = oDonation - serverDonationTotal + 1
+                        if (eggsNeeded <= effectiveRemainingQuota) {
                             // 如果这个名次的星星比之前发现的目标更高，或者星星一样但更省蛋
                             if (oStars > targetStarsExpected) {
                                 targetStarsExpected = oStars
@@ -310,11 +334,11 @@ private fun AntFarm.checkRankAndDonate(remainingQuota: Int): Boolean {
                     Log.record(TAG, "精明捐赠：当前奖励${myStars}星，目标排名${targetRank}(奖励${targetStarsExpected}星)，需反超${targetEggsNeeded}个蛋")
                     if (donateForCompetition(targetEggsNeeded)) {
                         // 捐赠成功后立即手动更新一次本地计数
-                        Status.updateDonationCount(myUid, targetEggsNeeded, incremental = true)
+                        Status.updateDailyDonationTotal(myUid, targetEggsNeeded, incremental = true)
                         return true
                     }
                 } else {
-                    Log.record(TAG, "评估结论：剩余配额(${remainingQuota})不足以提升星星奖励，放弃捐赠")
+                    Log.record(TAG, "评估结论：剩余配额(${effectiveRemainingQuota})不足以提升星星奖励，放弃捐赠")
                 }
             }
         }
@@ -327,12 +351,14 @@ private fun AntFarm.checkRankAndDonate(remainingQuota: Int): Boolean {
 private fun AntFarm.donateForCompetition(count: Int): Boolean {
     try {
         if (harvestBenevolenceScore < count) {
-            if (harvestEggIfInsufficient?.value == true && benevolenceScore >= 1.0) {
+            if (benevolenceScore >= 1.0) {
                 Log.record(TAG, "排位反超蛋数不足(当前:$harvestBenevolenceScore)，发现有待收取蛋($benevolenceScore)，尝试先收获...")
                 harvestProduce(ownerFarmId)
             }
 
-            if (harvestBenevolenceScore < count) {
+            if (harvestBenevolenceScore < count &&
+                !tryUseSpecialFoodForCompetition(count)
+            ) {
                 Log.record(TAG, "排位反超🥚[鸡蛋不足(当前:$harvestBenevolenceScore)，需要:$count，跳过本次捐赠]")
                 return false
             }
@@ -361,4 +387,123 @@ private fun AntFarm.donateForCompetition(count: Int): Boolean {
         Log.printStackTrace(TAG, "donateForCompetition err:", e)
     }
     return false
+}
+
+private fun AntFarm.tryUseSpecialFoodForCompetition(requiredEggCount: Int): Boolean {
+    if (harvestBenevolenceScore >= requiredEggCount) {
+        return true
+    }
+    if (!isAutoUseSpecialFoodEnabled()) {
+        Log.record(TAG, "排位反超蛋数不足，未开启“使用特殊食品”，跳过特殊食品补蛋")
+        return false
+    }
+    if (donationCompetitionTrySpecialFood?.value != true) {
+        return false
+    }
+    if (isOwnerAnimalSleeping()) {
+        Log.record(TAG, "排位反超蛋数不足，小鸡正在睡觉，无法通过特殊食品补蛋")
+        return false
+    }
+    if (!isOwnerAnimalAtHome()) {
+        Log.record(TAG, "排位反超蛋数不足，小鸡不在庄园，暂不尝试特殊食品补蛋")
+        return false
+    }
+
+    val usageCountFlag = StatusFlags.FLAG_FARM_SPECIAL_FOOD_DONATION_COMPETITION_DAILY_COUNT
+    val usageLimitFlag = StatusFlags.FLAG_FARM_SPECIAL_FOOD_DONATION_COMPETITION_LIMIT
+    val dailyLimit = donationCompetitionSpecialFoodCount?.value ?: -1
+
+    while (harvestBenevolenceScore < requiredEggCount) {
+        if (isOwnerAnimalSleeping()) {
+            Log.record(TAG, "排位反超蛋数不足，尝试补蛋过程中小鸡进入睡眠，停止特殊食品补蛋")
+            return false
+        }
+        if (!isOwnerAnimalAtHome()) {
+            Log.record(TAG, "排位反超蛋数不足，尝试补蛋过程中小鸡离开庄园，停止特殊食品补蛋")
+            return false
+        }
+
+        val usedToday = Status.getIntFlagToday(usageCountFlag) ?: 0
+        if (dailyLimit > 0 &&
+            (Status.hasFlagToday(usageLimitFlag) || usedToday >= dailyLimit)
+        ) {
+            Status.setFlagToday(usageLimitFlag)
+            Log.record(TAG, "排位赛特殊食品今日已使用${usedToday}个，达到上限${dailyLimit}个，停止补蛋")
+            return false
+        }
+
+        val cuisineList = fetchCuisineListForCompetition() ?: return false
+        val availableFoodCount = countAvailableSpecialFood(cuisineList)
+        if (availableFoodCount <= 0) {
+            Log.record(TAG, "排位反超蛋数不足，当前没有可用特殊食品，停止补蛋")
+            return false
+        }
+
+        val remainingDailyQuota = if (dailyLimit > 0) dailyLimit - usedToday else -1
+        val maxUsage = if (remainingDailyQuota < 0) 1 else minOf(1, remainingDailyQuota)
+        if (maxUsage <= 0) {
+            Status.setFlagToday(usageLimitFlag)
+            Log.record(TAG, "排位赛特殊食品今日已无剩余额度，停止补蛋")
+            return false
+        }
+
+        val usedThisRound = useSpecialFood(
+            cuisineList = cuisineList,
+            maxUsage = maxUsage,
+            usageCountFlag = usageCountFlag,
+            usageLimitFlag = usageLimitFlag,
+            usageDailyLimit = dailyLimit,
+            usageLabel = "排位赛特殊食品"
+        )
+        if (usedThisRound <= 0) {
+            Log.record(TAG, "排位反超蛋数不足，特殊食品调用未成功，停止补蛋")
+            return false
+        }
+
+        if (benevolenceScore >= 1.0) {
+            harvestProduce(ownerFarmId)
+        }
+        syncAnimalStatus(ownerFarmId)
+    }
+    return true
+}
+
+private fun AntFarm.fetchCuisineListForCompetition(): JSONArray? {
+    val uid = UserMap.currentUid
+    if (uid.isNullOrBlank()) {
+        Log.record(TAG, "排位赛读取特殊食品库存失败：当前用户ID为空")
+        return null
+    }
+    return try {
+        val jo = JSONObject(AntFarmRpcCall.enterFarm(uid, uid))
+        if (!ResChecker.checkRes(TAG, jo)) {
+            Log.record(TAG, "排位赛读取特殊食品库存失败: ${jo.optString("memo").ifBlank { jo.optString("resultDesc") }}")
+            null
+        } else {
+            val farmVO = jo.optJSONObject("farmVO")
+            if (farmVO != null) {
+                harvestBenevolenceScore = farmVO.optDouble("harvestBenevolenceScore", harvestBenevolenceScore)
+            }
+            val cuisineList = jo.optJSONArray("cuisineList")
+            if (cuisineList == null) {
+                Log.record(TAG, "排位赛读取特殊食品库存失败：cuisineList 为空")
+            }
+            cuisineList
+        }
+    } catch (e: Exception) {
+        Log.printStackTrace(TAG, "fetchCuisineListForCompetition err:", e)
+        null
+    }
+}
+
+private fun countAvailableSpecialFood(cuisineList: JSONArray): Int {
+    var available = 0
+    for (i in 0 until cuisineList.length()) {
+        val item = cuisineList.optJSONObject(i) ?: continue
+        val count = item.optInt("count", 0)
+        if (count > 0) {
+            available += count
+        }
+    }
+    return available
 }

@@ -86,62 +86,40 @@ internal suspend fun AntFarm.runFarmTaskWorkflow(tc: TimeCounter, userId: String
         harvestProduce(ownerFarmId)
         tc.countDebug("收鸡蛋")
     }
-    var familyDailyDonateResult = AntFarmFamily.DailyDonateTaskResult.NOT_HANDLED
-    var familyDonationActivityIds: Set<String> = emptySet()
-    var attemptedPublicDonation = false
-    var skipPublicDonationThisRun = false
-    if (family?.value == true && donation?.value == true) {
-        val singleDonationMode = donationCount?.value != AntFarm.DonationCount.ALL
-        familyDailyDonateResult = AntFarmFamily.handleDailyDonateTask(this)
-        if (familyDailyDonateResult.consumedDonation) {
-            familyDonationActivityIds = lastDonationActivityIds
-        }
-        if (singleDonationMode && familyDailyDonateResult.consumedDonation) {
-            Status.updateDonationCount(userId, 1, incremental = true)
-            skipPublicDonationThisRun = true
-        }
-        if (familyDailyDonateResult == AntFarmFamily.DailyDonateTaskResult.DONATED_CONFIRMED) {
-            if (donationCount?.value == AntFarm.DonationCount.ALL) {
-                Log.farm("家庭任务已优先完成首笔捐蛋，继续按配置处理后续公益捐蛋")
-            } else {
-                Log.farm("家庭任务优先完成本轮捐蛋，跳过公益捐蛋")
-            }
-        } else if (familyDailyDonateResult == AntFarmFamily.DailyDonateTaskResult.DONATED_UNCONFIRMED) {
-            if (singleDonationMode) {
-                Log.farm("家庭任务已执行捐蛋但完成状态未确认，本轮按已消耗一次捐蛋处理，跳过公益捐蛋")
-            } else {
-                Log.farm("家庭任务已执行捐蛋但完成状态未确认，继续按配置处理剩余公益捐蛋")
-            }
-        } else if (familyDailyDonateResult == AntFarmFamily.DailyDonateTaskResult.ALREADY_COMPLETED
-            && donationCount?.value != AntFarm.DonationCount.ALL
-        ) {
-            Log.farm("家庭任务已显示今日捐蛋完成，继续按原有公益捐蛋逻辑处理")
-        }
-    }
-    if (!skipPublicDonationThisRun && shouldDonateEggNow(userId)) {
-        attemptedPublicDonation = true
-        val publicDonationDone = handleDonation(
-            donationCount?.value ?: 0,
-            skipActivityIds = familyDonationActivityIds
-        )
+    if (donation?.value == true && shouldDonateEggNow(userId)) {
+        val publicDonationMade = handleDonation()
         tc.countDebug("每日捐蛋")
-        if (publicDonationDone) {
+        val dailyDonationMarkedDone = !userId.isNullOrBlank() &&
+            Status.hasFlagToday(StatusFlags.FLAG_FARM_DAILY_DONATION_DONE_PREFIX + userId)
+        if (publicDonationMade) {
+            if (dailyDonationMarkedDone) {
+                Log.farm("今日捐蛋完成")
+            } else {
+                Log.farm("公益捐蛋部分完成，保留后续重试")
+            }
+            if (family?.value == true) {
+                AntFarmFamily.confirmDailyDonateTaskAfterPublicDonation()
+            }
+        } else if (dailyDonationMarkedDone) {
             Log.farm("今日捐蛋完成")
         } else if (!lastDonationNoMoreActivities) {
             Log.farm("公益捐蛋未完成，保留后续重试")
         }
-    }
-    if (familyDailyDonateResult.consumedDonation && !userId.isNullOrBlank() && Status.getDonationCount(userId) < 1) {
-        val noFurtherDonationNeeded =
-            if (!familyDailyDonateResult.shouldMarkDonationDone) {
-                false
+    } else if (donation?.value == true &&
+        !userId.isNullOrBlank() &&
+        !Status.hasFlagToday(StatusFlags.FLAG_FARM_DAILY_DONATION_DONE_PREFIX + userId)
+    ) {
+        val amount = donationAmount?.value ?: 1
+        val dailyLimit = maxDailyDonationCompetitionCount?.value ?: -1
+        val remainingQuota = dailyLimit - Status.getDailyDonationTotal(userId)
+        if (dailyLimit >= 0 && remainingQuota < amount) {
+            if (remainingQuota <= 0) {
+                Log.farm("今日已捐蛋总数已达每日捐蛋上限($dailyLimit)，跳过普通每日捐蛋")
             } else {
-                donationCount?.value != AntFarm.DonationCount.ALL ||
-                    !shouldDonateEggNow(userId) ||
-                    (attemptedPublicDonation && lastDonationNoMoreActivities)
+                Log.farm("今日捐蛋剩余额度不足单次捐蛋量，跳过普通每日捐蛋：剩余${remainingQuota}颗，单次需要${amount}颗")
             }
-        if (noFurtherDonationNeeded) {
-            Status.updateDonationCount(userId, 1, incremental = true)
+        } else if (harvestBenevolenceScore < amount) {
+            Log.farm("可用爱心蛋不足，跳过普通每日捐蛋：当前${harvestBenevolenceScore}颗，需要${amount}颗")
         }
     }
 
