@@ -369,7 +369,7 @@ class AntFarm : ModelTask() {
             IntegerModelField(
                 "accelerateToolDailyLimit",
                 "加速卡 | 每日最多使用张数(-1为不限)",
-                -1,
+                1,
                 -1,
                 null
             ).withDesc("每日最多使用多少张加速卡；-1 不限，0 表示当日不使用。").also {
@@ -634,7 +634,7 @@ class AntFarm : ModelTask() {
             IntegerModelField(
                 "maxDailyDonationCompetitionCount",
                 "每日捐蛋上限",
-                -1,
+                10,
                 -1,
                 20000
             ).withDesc("控制今日最多允许捐出的爱心蛋总量；普通每日公益捐蛋与排位赛补捐共享该上限，-1 表示不限制。").also {
@@ -666,7 +666,7 @@ class AntFarm : ModelTask() {
             IntegerModelField(
                 "donationCompetitionSpecialFoodCount",
                 "捐蛋排位赛 | 特殊食品每日上限",
-                -1,
+                1,
                 -1,
                 20000
             ).withDesc("仅用于排位赛补捐阶段自动使用特殊食品的次数上限；与日常“使用特殊食品 | 每日次数限制”独立计数，-1 表示不限制。").also {
@@ -712,7 +712,7 @@ class AntFarm : ModelTask() {
             IntegerModelField(
                 "useSpecialFoodCount",
                 "使用特殊食品 | 每日次数限制(-1为无限制)",
-                -1,
+                1,
                 -1,
                 null
             ).withDesc("控制今日最多自动使用多少个特殊食品；-1 表示不限制。数量达到 10 个及以上时会优先按连续投喂批次处理。").also {
