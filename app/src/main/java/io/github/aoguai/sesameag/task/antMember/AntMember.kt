@@ -1663,11 +1663,12 @@ class AntMember : ModelTask() {
 
             var allHandled = warmUpInsuredGoldEntrance()
 
+            val handledInsuredGoldFlowNos = mutableSetOf<String>()
             var insuredGoldQueryRound = 0
             var shouldRecheckInsuredGold: Boolean
             do {
                 insuredGoldQueryRound++
-                val passResult = collectAvailableInsuredGoldOnce()
+                val passResult = collectAvailableInsuredGoldOnce(handledInsuredGoldFlowNos)
                 if (passResult.result != DailyTaskProcessResult.HANDLED) {
                     allHandled = false
                 }
@@ -1687,7 +1688,9 @@ class AntMember : ModelTask() {
         }
     }
 
-    private fun collectAvailableInsuredGoldOnce(): InsuredGoldCollectionPassResult {
+    private fun collectAvailableInsuredGoldOnce(
+        handledFlowNos: MutableSet<String>
+    ): InsuredGoldCollectionPassResult {
         var availableCount = 0
         var passResult = DailyTaskProcessResult.HANDLED
         val response = AntMemberRpcCall.queryAvailableCollectInsuredGold()
@@ -1707,14 +1710,21 @@ class AntMember : ModelTask() {
             signInBall.optInt("sendFlowStatus") == 1 &&
             signInBall.optInt("sendType") == 1
         ) {
-            availableCount++
-            passResult = mergeDailyTaskProcessResult(passResult, collectSingleInsuredGold(signInBall, true))
+            val sendFlowNo = signInBall.optString("sendFlowNo")
+            if (sendFlowNo.isBlank() || handledFlowNos.add(sendFlowNo)) {
+                availableCount++
+                passResult = mergeDailyTaskProcessResult(passResult, collectSingleInsuredGold(signInBall, true))
+            }
         }
 
         val otherBallList = data.optJSONArray("eventToWaitDTOList") ?: JSONArray()
         for (i in 0 until otherBallList.length()) {
             val anotherBall = otherBallList.optJSONObject(i) ?: continue
             if (anotherBall.optInt("sendType") != 1) {
+                continue
+            }
+            val sendFlowNo = anotherBall.optString("sendFlowNo")
+            if (sendFlowNo.isNotBlank() && !handledFlowNos.add(sendFlowNo)) {
                 continue
             }
             availableCount++
@@ -2229,6 +2239,9 @@ class AntMember : ModelTask() {
 
     private fun classifyInsuredGoldFailure(code: String, message: String): InsuredGoldRpcFailureType {
         return when {
+            code == "AE13116030004362" && message.contains("领金成功") ->
+                InsuredGoldRpcFailureType.DUPLICATE_REWARD
+
             message.contains("已领取") ||
                 message.contains("重复") ||
                 message.contains("已经领取") -> InsuredGoldRpcFailureType.DUPLICATE_REWARD
